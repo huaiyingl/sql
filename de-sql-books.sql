@@ -1,0 +1,130 @@
+/*
+ Database Schema
+ 
+ Table "books"                       Table "authors"
+ +------------------+-----------+    +-------------+-----------+
+ |      Column      |   Type    |    |   Column    |   Type    |
+ +------------------+-----------+    +-------------+-----------+
+ | book_id          | INT (KEY) | +->| author_id   | INT (KEY) |
+ | title            | VARCHAR   | |  | first_name  | VARCHAR   |
+ | author_id        | INT >-----|-+  | last_name   | VARCHAR   |
+ | publication_date | DATE      |    | birthday    | DATE      |
+ | category         | VARCHAR   |    | website_url | VARCHAR   |
+ | price            | DOUBLE    |    +-------------+-----------+
+ +------------------+-----------+
+ 
+ Table "transactions"                Table "customers"
+ +------------------+-----------+    +--------------------------+-----------+
+ |      Column      |   Type    |    |         Column           |   Type    |
+ +------------------+-----------+    +--------------------------+-----------+
+ | transaction_id   | INT (KEY) | +->| customer_id              | INT (KEY) |<-+
+ | book_id          | INT       | |  | first_name               | VARCHAR   |  |
+ | customer_id      | INT >-----|-+  | last_name                | VARCHAR   |  |
+ | payment_amount   | DOUBLE    |    | registration_date        | DATE      |  |
+ | book_count       | INT       |    | interested_in_categories | VARCHAR   |  |
+ | tax_rate         | DOUBLE    |    | is_rewards_member        | BOOLEAN   |  |
+ | discount_rate    | DOUBLE    |    | invited_by_customer_id   | INT >-----|--+
+ | transaction_date | DATE      |    +--------------------------+-----------+
+ | payment_type     | VARCHAR   |
+ +------------------+-----------+
+ 
+ */
+-- Q1 AGGREGATION --
+-- What was the total number of sold books and the unique number of sold books, grouped and sorted in descending order by payment_type?
+SELECT payment_type,
+    sum(book_count) AS total_sold_books,
+    COUNT(DISTINCT book_id) AS unique_sold_books
+FROM transactions
+GROUP BY payment_type
+ORDER BY payment_type DESC;
+
+
+/* Expected Output:
+ payment_type | total_sold_books | unique_sold_books
+ -------------|-----------------|------------------
+ 'VISA'       | 150            | 45
+ 'MASTERCARD' | 120            | 38
+ 'CASH'       | 80             | 25
+ */
+-- Q2 JOIN --
+-- Existing customers can invite other people to join the bookstore. Find the top 3 customers ordered by the total sales value of the people they directly invited.
+SELECT c.invited_by_customer_id AS customer_id_who_invited_people,
+    SUM(t.payment_amount) AS sales_value_of_invited_people
+FROM customers c
+    LEFT JOIN transactions t ON c.customer_id = t.customer_id
+WHERE c.invited_by_customer_id IS NOT NULL
+GROUP BY c.invited_by_customer_id
+ORDER BY sales_value_of_invited_people DESC
+LIMIT 3;
+
+
+/* Expected Output:
+ customer_id_who_invited_people | sales_value_of_invited_people
+ -----------------------------|---------------------------
+ 1001                         | 2500.50
+ 1002                         | 2100.75
+ 1003                         | 1850.25
+ */
+-- Q3 CASE WHEN, MULTI JOINS --
+-- Find the number of authors who have website URLs prefixed with "http://" and that never made a sale. Compare this with the total number of authors.
+SELECT COUNT(
+        CASE
+            WHEN a.website_url LIKE 'http://%'
+            AND b.book_id IS NULL THEN 1
+            ELSE 0
+        END
+    ) AS authors_with_http_and_no_sales,
+    COUNT(DISTINCT a.author_id) AS authors_in_total
+FROM authors a
+    LEFT JOIN books b ON a.author_id = b.author_id
+    LEFT JOIN transactions t ON b.book_id = t.book_id;
+
+
+/* Expected Output:
+ authors_with_http_and_no_sales | authors_in_total
+ ------------------------------|------------------
+ 5                             | 50
+ */
+-- Q4 MULTI JOINS, GROUP BY --
+-- Find customers who purchased books, from the same author, belonging to at least 2 categories. show the top 3 customers ordered by how much they spent on these books
+SELECT c.customer_id,
+    sum(t.payment_amount) AS total_spent
+FROM customer c
+    JOIN transactions t ON c.customer_id = t.customer_id
+    JOIN books b ON t.book_id = b.book_id
+GROUP BY c.customer_id,
+    b.author_id
+HAVING COUNT(DISTINCT b.category) >= 2
+ORDER BY total_spent DESC
+LIMIT 3;
+
+
+/* Expected Output:
+ customer_id | total_spent
+ ------------|-------------
+ 101         | 1250.75
+ 102         | 1100.50
+ 103         | 950.25
+ */
+-- Q5 WINDOW FUNCTION-- 
+-- Find the top 3 customers who spent the most money in 2023, along with their total spending amount and rank.
+SELECT c.customer_id,
+    ROUND(SUM(t.payment_amount), 2) AS total_spent,
+    RANK() OVER (
+        ORDER BY SUM(t.payment_amount) DESC
+    ) AS customer_rank
+FROM customers c
+    JOIN transactions t ON c.customer_id = t.customer_id
+WHERE YEAR(t.transaction_date) = 2023
+GROUP BY c.customer_id
+ORDER BY customer_rank
+LIMIT 3;
+
+
+/* Expected Output:
+ customer_id | total_spent | customer_rank
+ ------------|-------------|---------------
+ 501         | 3500.50    | 1
+ 502         | 3200.75    | 2
+ 503         | 2800.25    | 3
+ */
